@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<title>BLE Positioning Live Demo</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600&display=swap">
+<style>
+/* Layout: instrument bench. Room canvas on the left, control + readout panel on the right; stacks on phones. */
+:root {
+  --bg: #f3f4f8;
+  --surface: #ffffff;
+  --fg: #16181f;
+  --muted: #5d6273;
+  --line: #d9dce6;
+  --accent: #6a3fa6;          /* beacon purple, used for UI accents */
+  --accent-soft: #ece5f7;
+  --grid-dot: #c3c7d4;
+  --m-tri: #d62728;
+  --m-wc: #ff7f0e;
+  --m-knn: #1f77b4;
+  --m-kf: #2ca02c;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12131a; --surface: #1b1d26; --fg: #eceef4; --muted: #a0a5b7; --line: #2f3240;
+    --accent: #b896ec; --accent-soft: #2c2440; --grid-dot: #3d4152;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12131a; --surface: #1b1d26; --fg: #eceef4; --muted: #a0a5b7; --line: #2f3240;
+  --accent: #b896ec; --accent-soft: #2c2440; --grid-dot: #3d4152;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 15px/1.5 var(--font-body);
+  padding-block: 20px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+header { display: flex; flex-direction: column; gap: 4px; }
+.eyebrow { font: 500 12px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+h1 { font: 600 clamp(26px, 4vw, 36px)/1.1 var(--font-display); margin: 0; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); max-width: 70ch; }
+
+.app { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+@media (max-width: 920px) { .app { grid-template-columns: minmax(0, 1fr); } }
+
+.stage { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+canvas { display: block; width: 100%; max-width: 100%; aspect-ratio: 22 / 17; touch-action: none; cursor: crosshair; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.sw.line { height: 3px; border-radius: 2px; width: 16px; }
+.sw.tri { width: 0; height: 0; border-radius: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 12px solid var(--accent); }
+.hint { font-size: 13px; color: var(--muted); margin: 0; }
+
+.panel { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card h2 { font: 500 12px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-right: 1px solid var(--line); border-radius: 0; background: transparent; }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--surface); }
+button {
+  font: 500 14px/1 var(--font-body); color: var(--fg); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); min-width: 84px; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.field { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; font-size: 14px; }
+.field output { font: 500 13px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--accent); }
+.field input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.label { font-size: 14px; }
+
+.checks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size: 14px; }
+.checks label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.checks input { accent-color: var(--accent); }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+th { font: 500 11px var(--font-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); text-align: right; padding: 0 4px 6px; }
+th:first-child, td:first-child { text-align: left; }
+td { padding: 6px 4px; border-top: 1px solid var(--line); text-align: right; font-family: var(--font-mono); }
+td:first-child { font-family: var(--font-body); white-space: nowrap; }
+tr.best td { background: var(--accent-soft); }
+.pill { font: 600 10px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; background: var(--m-kf); color: #fff; border-radius: 99px; padding: 3px 6px; margin-left: 6px; vertical-align: 1px; }
+.meta { font-size: 12px; color: var(--muted); margin: 0; }
+
+.bars { display: flex; flex-direction: column; gap: 6px; }
+.bar { display: grid; grid-template-columns: 28px 1fr 74px; gap: 8px; align-items: center; font: 12px var(--font-mono); font-variant-numeric: tabular-nums; }
+.track { position: relative; height: 10px; background: var(--bg); border-radius: 5px; overflow: hidden; }
+.fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 5px; opacity: .8; }
+.tick { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--fg); }
+.bar span:last-child { text-align: right; }
+
+.explain { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 14px; }
+.explain .card p { margin: 0; color: var(--muted); font-size: 14px; }
+.explain h3 { margin: 0; font: 600 16px var(--font-body); display: flex; align-items: center; gap: 8px; }
+.explain .wide { grid-column: 1 / -1; }
+.try { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; color: var(--fg); font-size: 14px; }
+code { font-family: var(--font-mono); font-size: .92em; }
+footer p { margin: 0; color: var(--muted); font-size: 13px; max-width: 80ch; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">SRWC project · live simulation</span>
+    <h1>BLE Indoor Positioning: RSSI fingerprinting + Kalman tracking</h1>
+    <p>A 20 m × 15 m room with BLE beacons. Every tick, the phone hears a noisy RSSI from each beacon and four methods estimate where it is. Change the noise or the beacon count and watch the errors respond.</p>
+  </header>
+
+  <div class="app">
+    <section class="stage">
+      <canvas id="room" aria-label="Room map with beacons, true position and estimated positions"></canvas>
+      <div class="legend">
+        <span><i class="sw tri"></i>Beacon</span>
+        <span><i class="sw line" style="background:var(--fg)"></i>True position</span>
+        <span><i class="sw" style="background:var(--m-tri)"></i>Trilateration</span>
+        <span><i class="sw" style="background:var(--m-wc)"></i>Weighted centroid</span>
+        <span><i class="sw" style="background:var(--m-knn)"></i>kNN</span>
+        <span><i class="sw line" style="background:var(--m-kf)"></i>kNN + Kalman (proposed)</span>
+      </div>
+      <p class="hint" id="hint">Walking the rectangle path. Click or drag inside the room to move the user yourself.</p>
+    </section>
+
+    <aside class="panel">
+      <div class="card">
+        <h2>Simulation</h2>
+        <div class="row">
+          <div class="seg" role="group" aria-label="Mode">
+            <button id="modeWalk" aria-pressed="true">Walk path</button>
+            <button id="modeDrag" aria-pressed="false">Drag user</button>
+          </div>
+        </div>
+        <div class="row">
+          <button id="play" class="primary">Pause</button>
+          <button id="step">Step</button>
+          <button id="reset">Reset (seed 42)</button>
+        </div>
+        <div class="field">
+          <label for="sigma">Shadowing noise σ</label><output id="sigmaOut">4.0 dB</output>
+          <input id="sigma" type="range" min="0.5" max="10" step="0.5" value="4">
+        </div>
+        <div class="field">
+          <label for="speed">Speed</label><output id="speedOut">8 steps/s</output>
+          <input id="speed" type="range" min="1" max="40" step="1" value="8">
+        </div>
+        <div class="row">
+          <span class="label">Beacons</span>
+          <div class="seg" role="group" aria-label="Number of beacons" id="beaconSeg"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Live error (metres)</h2>
+        <table>
+          <thead><tr><th>Method</th><th>Now</th><th>Mean</th><th>P90</th><th>RMSE</th></tr></thead>
+          <tbody id="metrics"></tbody>
+        </table>
+        <p class="meta" id="nSamples"></p>
+      </div>
+
+      <div class="card">
+        <h2>Show on map</h2>
+        <div class="checks">
+          <label><input type="checkbox" id="show-tri" checked> Trilateration</label>
+          <label><input type="checkbox" id="show-wc" checked> Weighted centroid</label>
+          <label><input type="checkbox" id="show-knn" checked> kNN</label>
+          <label><input type="checkbox" id="show-kf" checked> kNN + Kalman</label>
+          <label><input type="checkbox" id="showCircles"> Distance circles</label>
+          <label><input type="checkbox" id="showGrid"> Radio map grid</label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>RSSI received now</h2>
+        <div class="bars" id="bars"></div>
+        <p class="meta">Bar is the noisy reading; the dark tick is the noise-free model value.</p>
+      </div>
+    </aside>
+  </div>
+
+  <section class="explain">
+    <div class="card">
+      <h3><i class="sw" style="background:var(--m-tri)"></i>Trilateration</h3>
+      <p>Turns each RSSI into a distance with d = 10<sup>(−59 − RSSI)/(10·2.2)</sup>, then solves the circle equations by linear least squares. A few dB of noise becomes metres of distance error, so it scatters badly.</p>
+    </div>
+    <div class="card">
+      <h3><i class="sw" style="background:var(--m-wc)"></i>Weighted centroid</h3>
+      <p>Averages the beacon positions weighted by 1/d. Stable under noise but always pulled toward the middle of the beacons, so it can never reach the walls.</p>
+    </div>
+    <div class="card">
+      <h3><i class="sw" style="background:var(--m-knn)"></i>kNN fingerprinting</h3>
+      <p>Offline: survey a 1 m grid (336 points, 10 samples each). Online: find the K = 4 grid points whose RSSI vectors are closest to the live reading and average them. Turn on "Radio map grid" to see the chosen neighbours.</p>
+    </div>
+    <div class="card">
+      <h3><i class="sw line" style="background:var(--m-kf)"></i>kNN + Kalman (proposed)</h3>
+      <p>Feeds each kNN fix into a constant-velocity Kalman filter with state [x, y, vx, vy], q = 0.05 and R = 2.5² m². The motion model rejects jumps a walking person cannot make.</p>
+    </div>
+    <div class="card wide">
+      <h3>Things to try in the demo</h3>
+      <ol class="try">
+        <li>Slide σ from 1 to 8 dB. Trilateration's mean error climbs fastest.</li>
+        <li>Turn on distance circles. They rarely meet at one point, which is why trilateration fails.</li>
+        <li>Switch to 3 beacons, then 8. kNN improves as beacons are added.</li>
+        <li>Drag the user around. The green track follows smoothly while the blue dots jump.</li>
+      </ol>
+    </div>
+  </section>
+
+  <footer>
+    <p>The same model and parameters as the Python project (P<sub>tx</sub> = −59 dBm, n = 2.2, radio map surveyed at σ = 4 dB, K = 4). This page uses a JavaScript random generator, so its numbers differ slightly from the official Python results in the README.</p>
+  </footer>
+</div>
+
+<script>
+(() => {
+  // ---------- parameters (mirror ble_positioning/config.py) ----------
+  const ROOM_W = 20, ROOM_H = 15;
+  const TX = -59, N_EXP = 2.2, MIN_D = 0.1;
+  const MAP_SIGMA = 4, MAP_SAMPLES = 10, GRID_STEP = 1, K = 4;
+  const KF_DT = 1, KF_Q = 0.05, KF_R = 2.5 * 2.5;
+  const BASE = [[0, 0], [20, 0], [20, 15], [0, 15], [10, 7.5]];
+  const CONFIGS = {
+    3: [[0, 0], [20, 0], [0, 15]],
+    4: [[0, 0], [20, 0], [20, 15], [0, 15]],
+    5: BASE,
+    6: BASE.concat([[10, 0]]),
+    8: BASE.concat([[10, 0], [10, 15], [0, 7.5]]),
+  };
+  const WAYPOINTS = [[2, 2], [18, 2], [18, 13], [2, 13], [2, 2]];
+  const PATH_STEPS = 200;
+  const METHODS = [
+    { id: "tri", name: "Trilateration", color: "--m-tri" },
+    { id: "wc", name: "Weighted centroid", color: "--m-wc" },
+    { id: "knn", name: "kNN", color: "--m-knn" },
+    { id: "kf", name: "kNN + Kalman", color: "--m-kf" },
+  ];
+
+  // ---------- seeded random numbers ----------
+  function mulberry32(seed) {
+    return () => {
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  let rand, spare = null;
+  function gauss() {
+    if (spare !== null) { const s = spare; spare = null; return s; }
+    let u = 0; while (u === 0) u = rand();
+    const v = rand(), m = Math.sqrt(-2 * Math.log(u));
+    spare = m * Math.sin(2 * Math.PI * v);
+    return m * Math.cos(2 * Math.PI * v);
+  }
+
+  // ---------- radio model ----------
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const meanRssi = (p, b) => TX - 10 * N_EXP * Math.log10(Math.max(dist(p, b), MIN_D));
+  const rssi = (p, beacons, sigma) => beacons.map(b => meanRssi(p, b) + sigma * gauss());
+  const rssiToDist = r => Math.pow(10, (TX - r) / (10 * N_EXP));
+
+  // ---------- estimators ----------
+  const clip = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  function trilateration(r, beacons) {
+    const d = r.map(rssiToDist), last = beacons.length - 1;
+    const [xr, yr] = beacons[last], dr = d[last];
+    let a11 = 0, a12 = 0, a22 = 0, c1 = 0, c2 = 0;
+    for (let i = 0; i < last; i++) {
+      const [xi, yi] = beacons[i];
+      const ax = 2 * (xr - xi), ay = 2 * (yr - yi);
+      const b = d[i] ** 2 - dr ** 2 - (xi * xi + yi * yi) + (xr * xr + yr * yr);
+      a11 += ax * ax; a12 += ax * ay; a22 += ay * ay; c1 += ax * b; c2 += ay * b;
+    }
+    const det = a11 * a22 - a12 * a12;
+    if (Math.abs(det) < 1e-9) return weightedCentroid(r, beacons);
+    return [clip((a22 * c1 - a12 * c2) / det, 0, ROOM_W), clip((a11 * c2 - a12 * c1) / det, 0, ROOM_H)];
+  }
+
+  function weightedCentroid(r, beacons) {
+    let sx = 0, sy = 0, sw = 0;
+    r.forEach((v, i) => { const w = 1 / rssiToDist(v); sx += w * beacons[i][0]; sy += w * beacons[i][1]; sw += w; });
+    return [sx / sw, sy / sw];
+  }
+
+  function buildRadioMap(beacons) {
+    const grid = [], fps = [];
+    for (let y = 0; y <= ROOM_H + 1e-9; y += GRID_STEP)
+      for (let x = 0; x <= ROOM_W + 1e-9; x += GRID_STEP) {
+        const acc = new Array(beacons.length).fill(0);
+        for (let s = 0; s < MAP_SAMPLES; s++) rssi([x, y], beacons, MAP_SIGMA).forEach((v, i) => acc[i] += v);
+        grid.push([x, y]); fps.push(acc.map(v => v / MAP_SAMPLES));
+      }
+    return { grid, fps };
+  }
+
+  function knn(r, map) {
+    const ds = map.fps.map((f, i) => [Math.sqrt(f.reduce((s, v, j) => s + (v - r[j]) ** 2, 0)), i]);
+    ds.sort((a, b) => a[0] - b[0]);
+    let sx = 0, sy = 0, sw = 0;
+    const idx = [];
+    for (let k = 0; k < K; k++) {
+      const [dd, i] = ds[k], w = 1 / (dd + 1e-6);
+      sx += w * map.grid[i][0]; sy += w * map.grid[i][1]; sw += w; idx.push(i);
+    }
+    return { pos: [sx / sw, sy / sw], idx };
+  }
+
+  // ---------- Kalman filter, state [x, y, vx, vy] ----------
+  const mul = (A, B) => A.map(row => B[0].map((_, j) => row.reduce((s, v, k) => s + v * B[k][j], 0)));
+  const tr = A => A[0].map((_, j) => A.map(row => row[j]));
+  const add = (A, B) => A.map((row, i) => row.map((v, j) => v + B[i][j]));
+  const sub = (A, B) => A.map((row, i) => row.map((v, j) => v - B[i][j]));
+  const eye = n => Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => +(i === j)));
+
+  class Kalman2D {
+    constructor(dt = KF_DT, q = KF_Q, r = KF_R) {
+      this.F = [[1, 0, dt, 0], [0, 1, 0, dt], [0, 0, 1, 0], [0, 0, 0, 1]];
+      this.H = [[1, 0, 0, 0], [0, 1, 0, 0]];
+      const a = dt ** 4 / 4, b = dt ** 3 / 2, c = dt ** 2;
+      this.Q = [[a, 0, b, 0], [0, a, 0, b], [b, 0, c, 0], [0, b, 0, c]].map(row => row.map(v => q * v));
+      this.R = [[r, 0], [0, r]];
+      this.x = null; this.P = null;
+    }
+    step(z) {
+      if (!this.x) {
+        this.x = [[z[0]], [z[1]], [0], [0]];
+        this.P = [[this.R[0][0], 0, 0, 0], [0, this.R[1][1], 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
+        return [z[0], z[1]];
+      }
+      this.x = mul(this.F, this.x);
+      this.P = add(mul(mul(this.F, this.P), tr(this.F)), this.Q);
+      const y = sub([[z[0]], [z[1]]], mul(this.H, this.x));
+      const S = add(mul(mul(this.H, this.P), tr(this.H)), this.R);
+      const det = S[0][0] * S[1][1] - S[0][1] * S[1][0];
+      const Si = [[S[1][1] / det, -S[0][1] / det], [-S[1][0] / det, S[0][0] / det]];
+      const Kg = mul(mul(this.P, tr(this.H)), Si);
+      this.x = add(this.x, mul(Kg, y));
+      this.P = mul(sub(eye(4), mul(Kg, this.H)), this.P);
+      return [this.x[0][0], this.x[1][0]];
+    }
+  }
+
+  // ---------- walking path ----------
+  function walkingPath() {
+    const seg = [], cum = [0];
+    for (let i = 1; i < WAYPOINTS.length; i++) { seg.push(dist(WAYPOINTS[i - 1], WAYPOINTS[i])); cum.push(cum[i - 1] + seg[i - 1]); }
+    const L = cum[cum.length - 1], pts = [];
+    for (let s = 0; s < PATH_STEPS; s++) {
+      const t = (L * s) / (PATH_STEPS - 1);
+      let i = 1; while (i < cum.length - 1 && cum[i] < t) i++;
+      const f = seg[i - 1] ? (t - cum[i - 1]) / seg[i - 1] : 0;
+      const a = WAYPOINTS[i - 1], b = WAYPOINTS[i];
+      pts.push([a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1])]);
+    }
+    return pts;
+  }
+  const PATH = walkingPath();
+
+  // ---------- state ----------
+  const S = {
+    mode: "walk", playing: true, sigma: 4, speed: 8, nb: 5,
+    show: { tri: true, wc: true, knn: true, kf: true }, circles: false, grid: false,
+  };
+  let beacons, map, kf, idx, truth, dragPos, trails, truthTrail, errors, now, lastR, lastIdx;
+
+  function reset() {
+    rand = mulberry32(42); spare = null;
+    beacons = CONFIGS[S.nb];
+    map = buildRadioMap(beacons);
+    kf = new Kalman2D();
+    idx = -1; truth = PATH[0]; dragPos = dragPos || [10, 7.5];
+    trails = { tri: [], wc: [], knn: [], kf: [] }; truthTrail = [];
+    errors = { tri: [], wc: [], knn: [], kf: [] }; now = {};
+    lastR = null; lastIdx = [];
+    buildBars();
+  }
+
+  function tick() {
+    if (S.mode === "walk") { idx = (idx + 1) % PATH.length; truth = PATH[idx]; }
+    else truth = dragPos.slice();
+    const r = rssi(truth, beacons, S.sigma);
+    const k = knn(r, map);
+    const est = { tri: trilateration(r, beacons), wc: weightedCentroid(r, beacons), knn: k.pos };
+    est.kf = kf.step(k.pos);
+    const cap = S.mode === "walk" ? PATH_STEPS : 60;
+    for (const m of METHODS) {
+      trails[m.id].push(est[m.id]); if (trails[m.id].length > cap) trails[m.id].shift();
+      now[m.id] = dist(est[m.id], truth); errors[m.id].push(now[m.id]);
+    }
+    truthTrail.push(truth); if (truthTrail.length > cap) truthTrail.shift();
+    lastR = r; lastIdx = k.idx;
+  }
+
+  // ---------- drawing ----------
+  const canvas = document.getElementById("room"), ctx = canvas.getContext("2d");
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  let scale = 1, W = 0, H = 0;
+  const MARGIN = 1; // metres around the room
+  const px = p => [(p[0] + MARGIN) * scale, H - (p[1] + MARGIN) * scale];
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth;
+    W = w; H = w * 17 / 22; scale = w / 22;
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw();
+  }
+
+  function draw() {
+    if (!W) return;
+    const fg = css("--fg"), muted = css("--muted"), line = css("--line"), gridDot = css("--grid-dot"), accent = css("--accent");
+    ctx.clearRect(0, 0, W, H);
+
+    // 1 m grid and room outline
+    ctx.strokeStyle = line; ctx.lineWidth = 1;
+    for (let x = 0; x <= ROOM_W; x++) { const [a, b] = px([x, 0]), [, d] = px([x, ROOM_H]); ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(a, d); ctx.stroke(); }
+    for (let y = 0; y <= ROOM_H; y++) { const [a, b] = px([0, y]), [c] = px([ROOM_W, y]); ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, b); ctx.stroke(); }
+    ctx.strokeStyle = muted; ctx.lineWidth = 1.5;
+    const [x0, y0] = px([0, 0]), [x1, y1] = px([ROOM_W, ROOM_H]);
+    ctx.strokeRect(x0, y1, x1 - x0, y0 - y1);
+
+    // axis labels every 5 m
+    ctx.fillStyle = muted; ctx.font = `${Math.max(10, scale * 0.42)}px ${css("--font-mono")}`;
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    for (let x = 5; x < ROOM_W; x += 5) { const [a, b] = px([x, 0]); ctx.fillText(`${x} m`, a, b + 4); }
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (let y = 5; y < ROOM_H; y += 5) { const [a, b] = px([0, y]); ctx.fillText(`${y}`, a - 4, b); }
+
+    // radio map grid + chosen neighbours
+    if (S.grid) {
+      ctx.fillStyle = gridDot;
+      for (const g of map.grid) { const [a, b] = px(g); ctx.beginPath(); ctx.arc(a, b, 2, 0, 7); ctx.fill(); }
+      ctx.strokeStyle = css("--m-knn"); ctx.lineWidth = 2;
+      for (const i of lastIdx) { const [a, b] = px(map.grid[i]); ctx.beginPath(); ctx.arc(a, b, 6, 0, 7); ctx.stroke(); }
+    }
+
+    // distance circles from the current RSSI
+    if (S.circles && lastR) {
+      ctx.strokeStyle = css("--m-tri"); ctx.globalAlpha = 0.45; ctx.setLineDash([5, 5]); ctx.lineWidth = 1.5;
+      beacons.forEach((b, i) => { const [a, c] = px(b); ctx.beginPath(); ctx.arc(a, c, rssiToDist(lastR[i]) * scale, 0, 7); ctx.stroke(); });
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+
+    // true path
+    ctx.strokeStyle = fg; ctx.lineWidth = 2;
+    const tp = S.mode === "walk" ? PATH : truthTrail;
+    if (tp.length > 1) { ctx.beginPath(); tp.forEach((p, i) => { const [a, b] = px(p); i ? ctx.lineTo(a, b) : ctx.moveTo(a, b); }); ctx.globalAlpha = S.mode === "walk" ? 0.35 : 0.6; ctx.stroke(); ctx.globalAlpha = 1; }
+
+    // dot methods
+    for (const id of ["tri", "wc", "knn"]) {
+      if (!S.show[id]) continue;
+      ctx.fillStyle = css(METHODS.find(m => m.id === id).color);
+      const t = trails[id];
+      t.forEach((p, i) => { const [a, b] = px(p); ctx.globalAlpha = 0.15 + 0.55 * (i / t.length); ctx.beginPath(); ctx.arc(a, b, 3, 0, 7); ctx.fill(); });
+      ctx.globalAlpha = 1;
+      if (t.length) { const [a, b] = px(t[t.length - 1]); ctx.beginPath(); ctx.arc(a, b, 6, 0, 7); ctx.fill(); ctx.strokeStyle = css("--surface"); ctx.lineWidth = 2; ctx.stroke(); }
+    }
+
+    // Kalman track
+    if (S.show.kf && trails.kf.length) {
+      ctx.strokeStyle = css("--m-kf"); ctx.lineWidth = 3; ctx.lineJoin = "round";
+      ctx.beginPath(); trails.kf.forEach((p, i) => { const [a, b] = px(p); i ? ctx.lineTo(a, b) : ctx.moveTo(a, b); }); ctx.stroke();
+      const [a, b] = px(trails.kf[trails.kf.length - 1]);
+      ctx.fillStyle = css("--m-kf"); ctx.beginPath(); ctx.arc(a, b, 7, 0, 7); ctx.fill(); ctx.strokeStyle = css("--surface"); ctx.lineWidth = 2; ctx.stroke();
+    }
+
+    // beacons
+    beacons.forEach((b, i) => {
+      const [a, c] = px(b), s = Math.max(8, scale * 0.42);
+      ctx.fillStyle = accent; ctx.strokeStyle = fg; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(a, c - s); ctx.lineTo(a + s * 0.9, c + s * 0.6); ctx.lineTo(a - s * 0.9, c + s * 0.6); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = fg; ctx.font = `600 ${Math.max(10, scale * 0.4)}px ${css("--font-mono")}`;
+      ctx.textAlign = b[0] >= ROOM_W ? "right" : "left"; ctx.textBaseline = "bottom";
+      ctx.fillText(`B${i + 1}`, a + (b[0] >= ROOM_W ? -s : s), c - s * 0.4);
+    });
+
+    // user
+    if (truth) {
+      const [a, b] = px(truth);
+      ctx.fillStyle = fg; ctx.beginPath(); ctx.arc(a, b, 7, 0, 7); ctx.fill();
+      ctx.strokeStyle = css("--surface"); ctx.lineWidth = 2.5; ctx.stroke();
+    }
+  }
+
+  // ---------- panel ----------
+  const pct = (arr, p) => { const s = arr.slice().sort((a, b) => a - b); const i = (s.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i); return s[lo] + (s[hi] - s[lo]) * (i - lo); };
+  const metricsBody = document.getElementById("metrics"), nEl = document.getElementById("nSamples");
+
+  function updatePanel() {
+    const n = errors.kf.length;
+    const rows = METHODS.map(m => {
+      const e = errors[m.id];
+      if (!e.length) return { m, now: NaN, mean: NaN, p90: NaN, rmse: NaN };
+      const mean = e.reduce((s, v) => s + v, 0) / e.length;
+      return { m, now: now[m.id], mean, p90: pct(e, 0.9), rmse: Math.sqrt(e.reduce((s, v) => s + v * v, 0) / e.length) };
+    });
+    const best = rows.reduce((a, b) => (b.mean < a.mean ? b : a), rows[0]);
+    const f = v => (Number.isFinite(v) ? v.toFixed(2) : "–");
+    metricsBody.innerHTML = rows.map(r => `
+      <tr class="${n && r === best ? "best" : ""}">
+        <td><i class="sw" style="background:var(${r.m.color})"></i> ${r.m.name}${n && r === best ? '<span class="pill">best</span>' : ""}</td>
+        <td>${f(r.now)}</td><td>${f(r.mean)}</td><td>${f(r.p90)}</td><td>${f(r.rmse)}</td>
+      </tr>`).join("");
+    nEl.textContent = n ? `${n} measurements since the last reset · ${S.nb} beacons · σ = ${S.sigma.toFixed(1)} dB` : "Press Play or Step to start.";
+
+    if (lastR) beacons.forEach((b, i) => {
+      const pos = v => clip((v + 100) / 60, 0, 1) * 100; // -100..-40 dBm
+      barEls[i].fill.style.width = pos(lastR[i]) + "%";
+      barEls[i].tick.style.left = `calc(${pos(meanRssi(truth, b))}% - 1px)`;
+      barEls[i].val.textContent = `${lastR[i].toFixed(1)} dBm`;
+    });
+  }
+
+  let barEls = [];
+  function buildBars() {
+    const box = document.getElementById("bars");
+    box.innerHTML = beacons.map((_, i) => `<div class="bar"><span>B${i + 1}</span><div class="track"><div class="fill"></div><div class="tick"></div></div><span>–</span></div>`).join("");
+    barEls = [...box.children].map(el => ({ fill: el.querySelector(".fill"), tick: el.querySelector(".tick"), val: el.lastElementChild }));
+  }
+
+  // ---------- controls ----------
+  const $ = id => document.getElementById(id);
+  const playBtn = $("play");
+  function setPlaying(p) { S.playing = p; playBtn.textContent = p ? "Pause" : "Play"; }
+  playBtn.onclick = () => setPlaying(!S.playing);
+  $("step").onclick = () => { setPlaying(false); tick(); updatePanel(); draw(); };
+  $("reset").onclick = () => { reset(); updatePanel(); draw(); };
+
+  function setMode(m) {
+    S.mode = m;
+    $("modeWalk").setAttribute("aria-pressed", m === "walk");
+    $("modeDrag").setAttribute("aria-pressed", m === "drag");
+    $("hint").textContent = m === "walk"
+      ? "Walking the rectangle path. Click or drag inside the room to move the user yourself."
+      : "Drag mode: click or drag inside the room to move the user. The filter has to follow you.";
+    reset(); updatePanel(); draw();
+  }
+  $("modeWalk").onclick = () => setMode("walk");
+  $("modeDrag").onclick = () => setMode("drag");
+
+  $("sigma").oninput = e => { S.sigma = +e.target.value; $("sigmaOut").textContent = `${S.sigma.toFixed(1)} dB`; reset(); updatePanel(); draw(); };
+  $("speed").oninput = e => { S.speed = +e.target.value; $("speedOut").textContent = `${S.speed} steps/s`; };
+
+  const seg = $("beaconSeg");
+  seg.innerHTML = Object.keys(CONFIGS).map(n => `<button data-n="${n}" aria-pressed="${+n === S.nb}">${n}</button>`).join("");
+  seg.onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    S.nb = +b.dataset.n;
+    seg.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b));
+    reset(); updatePanel(); draw();
+  };
+
+  for (const m of METHODS) $("show-" + m.id).onchange = e => { S.show[m.id] = e.target.checked; draw(); };
+  $("showCircles").onchange = e => { S.circles = e.target.checked; draw(); };
+  $("showGrid").onchange = e => { S.grid = e.target.checked; draw(); };
+
+  // drag the user
+  function toRoom(ev) {
+    const r = canvas.getBoundingClientRect();
+    const x = (ev.clientX - r.left) / scale - MARGIN, y = (r.bottom - ev.clientY) / scale - MARGIN;
+    return [clip(x, 0, ROOM_W), clip(y, 0, ROOM_H)];
+  }
+  let dragging = false;
+  canvas.addEventListener("pointerdown", ev => {
+    dragging = true; canvas.setPointerCapture(ev.pointerId);
+    dragPos = toRoom(ev);
+    if (S.mode !== "drag") setMode("drag");
+    if (!S.playing) setPlaying(true);
+  });
+  canvas.addEventListener("pointermove", ev => { if (dragging) dragPos = toRoom(ev); });
+  canvas.addEventListener("pointerup", () => { dragging = false; });
+
+  // ---------- loop ----------
+  let lastT = performance.now(), acc = 0;
+  function frame(t) {
+    const dt = Math.min(0.25, (t - lastT) / 1000); lastT = t;
+    if (S.playing) {
+      acc += dt * S.speed;
+      let n = 0;
+      while (acc >= 1 && n < 10) { tick(); acc -= 1; n++; }
+      if (n) updatePanel();
+    }
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  // start in a working state: 60 steps already simulated
+  reset();
+  for (let i = 0; i < 60; i++) tick();
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) setPlaying(false);
+  updatePanel();
+  new ResizeObserver(resize).observe(canvas);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body>
+</html>
