@@ -1,0 +1,5 @@
+method,mean_error_m,median_error_m,p90_error_m,rmse_m
+Trilateration,5.6244,4.9837,10.0895,6.4157
+Weighted centroid,4.6234,4.5917,6.5354,4.8677
+kNN,3.2675,2.5167,6.8939,4.0696
+kNN+Kalman,2.1607,1.8164,4.1565,2.7029
