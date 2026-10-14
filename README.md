@@ -33,6 +33,19 @@ pip install -r requirements.txt && python main.py
 ```
 All outputs are written to `results/`.
 
+## Live demo
+`demo/index.html` is an interactive version of the simulation for presentations.
+Open it in any browser (double-click the file). It needs no install and no internet.
+
+- Watch the user walk the rectangle path while all four methods run live, or drag the user around the room
+- Change the shadowing noise σ (0.5 to 10 dB) and the number of beacons (3, 4, 5, 6, 8)
+- The live error table (now, mean, P90, RMSE) highlights the best method
+- Toggles for distance circles (shows why trilateration fails) and the radio map grid (shows the K chosen neighbours)
+- Live RSSI bars per beacon: the noisy reading against the model value
+
+It uses the same model and parameters as the Python code but a JavaScript random
+generator, so its numbers differ slightly from the official results below.
+
 ## Project structure
 ```
 ble_positioning/
@@ -45,6 +58,7 @@ ble_positioning/
   plots.py         one function per figure
 main.py            runs everything, prints tables, saves figures + CSVs
 results/           generated output
+demo/index.html    interactive browser demo
 ```
 
 ## Results (seed 42)
